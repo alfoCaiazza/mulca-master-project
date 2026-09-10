@@ -1,0 +1,28 @@
+[project]
+name = "mulca-master-project"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "alfoCaiazza", email = "acaiazza2000@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "datasets>=5.0.1",
+    "fastapi[standard]>=0.141.1",
+    "pandas>=3.0.5",
+]
+
+[project.scripts]
+mulca-master-project = "mulca_master_project:main"
+
+[build-system]
+requires = ["uv_build>=0.12.11,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "jupyter>=1.1.1",
+    "pytest>=9.1.1",
+    "ruff>=0.16.6",
+]
