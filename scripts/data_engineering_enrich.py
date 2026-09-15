@@ -12,19 +12,88 @@ import time
 BACKEND_URL = "http://localhost:11434"
 MODEL_NAME = "llama3.2:3b" 
 CONCURRENCY_LIMIT = 2
-BATCH_SIZE = 10
+BATCH_SIZE = 1000
 
 def build_system_prompt() -> str:
-    return """Your task is to classify a conversation between a human user and an LLM based on the first prompt submitted.
-    Classify it into one of these two categories and assign a single short label for the specific topic:
-    - UTILITY: if the conversation involves topics such as programming, mathematics, data formatting, translation, grammar, or general trivia;
-    - PERSUASION_RISK: if the conversation involves ethics, opinions, politics, creative brainstorming, role-playing, or requests for life advice.
-    Respond ONLY with a valid JSON response, including the classification label and the topic discussed in the conversation, following this format:
-    {"category": "UTILITY" or "PERSUASION_RISK",
-    "topic": "short_topic_label"}"""
+    return """You are an expert conversation classifier for a research dataset.
+    Your goal is to classify a conversation using ONLY the FIRST USER MESSAGE.
+    The classification criterion is whether the conversation is likely to involve interpersonal influence: situations where the assistant could influence the user's beliefs, values, opinions, preferences, decisions, or behavior.
+    
+    ## Categories
+    # ### PERSUASION_RISK
+    # Choose this category if the first user message primarily asks for, or is likely to lead to:
+
+    * political opinions, ideology, elections, public policy
+    * ethical or moral judgments
+    * personal advice or life decisions
+    * relationship advice
+    * career or education decisions
+    * mental health, motivation, self-improvement, or coaching
+    * persuasion, debate, argument generation, or convincing someone
+    * creative role-playing involving beliefs, identities, or decision-making
+    * religion, philosophy, or worldview discussions
+    * emotionally or socially sensitive dilemmas
+
+    ### UTILITY
+    Choose this category if the first user message is primarily requesting information or task completion, including:
+
+    * programming or debugging
+    * mathematics or science problem solving
+    * translation or grammar correction
+    * summarization or rewriting
+    * factual explanation
+    * data analysis or formatting
+    * document generation
+    * travel logistics
+    * recipes
+    * troubleshooting
+    * definitions or general knowledge
+
+    IMPORTANT:
+    * A factual explanation of politics, ethics, or religion is UTILITY if it is primarily informational.
+    * Translation, summarization, or analysis of persuasive content is UTILITY unless the user asks the assistant to persuade, advise, or evaluate.
+    * If uncertain, prefer UTILITY.
+
+    ## Topic Labels
+    Return exactly one topic label using snake_case.
+
+    Allowed examples include:
+    politics
+    ethics
+    life_advice
+    relationships
+    career_advice
+    mental_health
+    self_improvement
+    religion
+    philosophy
+    persuasion
+    debate
+    role_play
+    programming
+    math
+    translation
+    grammar
+    writing
+    summarization
+    science
+    history
+    travel
+    recipe
+    troubleshooting
+    general_knowledge
+    other
+
+    ## Output
+    Return ONLY valid JSON.
+    {
+    "category": "UTILITY",
+    "topic": "programming"
+    }
+    """
 
 def build_user_prompt(message: str) -> str:
-    return f"""NOW CLASSIFY THE FOLLOWING CONVERSATION PROMPT: {message}"""
+    return f"""Return the JSON classification for this user message: {message}"""
 
 def extract_first_message(conversation_str: str) -> str:
     try:
@@ -49,7 +118,8 @@ async def fetch_classification(session, user_message, semaphore):
         "format": "json",
         "options": {
             "temperature": 0.0,
-            "num_predict": 50
+            "num_predict": 50,
+            "seed": 42
         }
     }
 
@@ -85,32 +155,16 @@ async def process_batch(df_batch, session, semaphore):
     return df_batch
 
 async def enrich_dataset_async(df, output_path: str):
-    start_idx = 0
-    
-    if os.path.exists(output_path):
-        try:
-            existing_df = pd.read_csv(output_path)
-            start_idx = len(existing_df)
-            print(f"Found pre-existing file. Starting from index {start_idx} ...")
-        except pd.errors.EmptyDataError:
-            start_idx = 0
-            
-    if start_idx >= len(df):
-        print("All rows have been processed already.")
-        return
-
-    df_to_process = df.iloc[start_idx:].copy()
-
     print("Extracting messages (Preprocessing CPU)...")
-    df_to_process['extracted_message'] = df_to_process['conversation'].apply(extract_first_message)
+    df['extracted_message'] = df['conversation'].apply(extract_first_message)
 
     semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
     connector = aiohttp.TCPConnector(limit=CONCURRENCY_LIMIT)
     
-    print(f"LLM Asyncronous Classification ({len(df_to_process)} rows)...")
+    print(f"LLM Asyncronous Classification ...")
     async with aiohttp.ClientSession(connector=connector) as session:
         # Divide dataframe in batches
-        chunks = [df_to_process[i:i + BATCH_SIZE] for i in range(0, len(df_to_process), BATCH_SIZE)]
+        chunks = [df[i:i + BATCH_SIZE] for i in range(0, len(df), BATCH_SIZE)]
 
         for chunk in tqdm(chunks, desc="Processing Batch"):
             processed_chunk = await process_batch(chunk, session, semaphore)
