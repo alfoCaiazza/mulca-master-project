@@ -12,14 +12,17 @@ dependencies = [
     "en-core-web-sm",
     "fastapi[standard]>=0.141.1",
     "matplotlib>=3.11.2",
+    "nltk>=3.10.3",
     "numpy>=2.5.3",
     "pandas>=3.0.5",
     "scikit-learn>=1.9.1",
     "seaborn>=0.13.2",
     "sentence-transformers>=6.0.1",
+    "sentencepiece>=0.2.2",
     "spacy>=3.8.16",
     "tiktoken>=0.14.0",
     "torch>=2.14.0",
+    "transformers>=5.17.0",
 ]
 
 [project.scripts]
