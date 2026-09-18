@@ -23,7 +23,7 @@ def process_conversation_row(conv_str: str, embedding_model) -> str:
         if isinstance(turns, list):
             for turn in turns:
                 text = turn.get("text", turn.get("content", ""))
-                turn["emb"] = compute_embedding(text, embedding_model)
+                turn["embedding"] = compute_embedding(text, embedding_model)
                 
         return str(turns)
         

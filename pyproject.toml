@@ -8,9 +8,11 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "bertopic>=0.17.4",
     "datasets>=5.0.1",
     "en-core-web-sm",
     "fastapi[standard]>=0.141.1",
+    "hdbscan>=0.8.44",
     "matplotlib>=3.11.2",
     "nltk>=3.10.3",
     "numpy>=2.5.3",
@@ -23,6 +25,7 @@ dependencies = [
     "tiktoken>=0.14.0",
     "torch>=2.14.0",
     "transformers>=5.17.0",
+    "umap-learn>=0.5.12",
 ]
 
 [project.scripts]
