@@ -16,46 +16,23 @@ def normalize_message(text: str) -> str:
     if not isinstance(text, str):
         return ""
 
-    # Decode HTML entities (&amp;, &lt;, ...)
+    # Decode HTML
     text = html.unescape(text)
 
     # 1. Replace fenced code blocks
-    text = re.sub(
-        r"```[\s\S]*?```",
-        " [CODE_BLOCK] ",
-        text,
-        flags=re.MULTILINE
-    )
-
-    # Replace inline code
+    text = re.sub(r"```[\s\S]*?```", " [CODE_BLOCK] ", text, flags=re.MULTILINE)
     text = re.sub(r"`[^`]+`", " [CODE_BLOCK] ", text)
 
     # 2. Replace URLs
-    text = re.sub(
-        r"https?://\S+|www\.\S+",
-        " [URL] ",
-        text
-    )
+    text = re.sub( r"https?://\S+|www\.\S+", " [URL] ", text)
 
     # 3. Remove Markdown links: [text](url) -> text
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-
-    # Images: ![alt](url) -> alt
     text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", text)
-
-    # Remove markdown emphasis (*, _, **, __, ~~)
     text = re.sub(r"(\*\*|\*|__|_|~~)", "", text)
-
-    # Remove headings (#, ##, ...)
     text = re.sub(r"^\s{0,3}#{1,6}\s*", "", text, flags=re.MULTILINE)
-
-    # Remove blockquotes
     text = re.sub(r"^\s*>\s?", "", text, flags=re.MULTILINE)
-
-    # Remove unordered list markers
     text = re.sub(r"^\s*[-+*]\s+", "", text, flags=re.MULTILINE)
-
-    # Remove ordered list markers
     text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
 
     # 4. Remove residual HTML tags
@@ -65,6 +42,20 @@ def normalize_message(text: str) -> str:
     text = re.sub(r"\s+", " ", text).strip()
 
     return text
+
+def normalize_conversation(conversation):
+    conversation = ast.literal_eval(conversation)
+    cleaned_conversation = []
+
+    for turn in conversation:
+        new_turn = turn.copy()
+
+        if "content" in new_turn:
+            new_turn["content"] = normalize_message(new_turn["content"])
+
+        cleaned_conversation.append(new_turn)
+
+    return cleaned_conversation
 
 def get_token_count(text: str) -> int:
     if not isinstance(text, str):
@@ -94,17 +85,10 @@ def filter_conversation(row: dict, min_turns: int, min_avg_tokens: float) -> boo
 
     # 2. Parse conversation
     conv_data = row.get("conversation", [])
-
-    if isinstance(conv_data, str):
-        try:
-            conv_data = ast.literal_eval(conv_data)
-        except (ValueError, SyntaxError):
-            return False
+    conv_data = ast.literal_eval(conv_data)
 
     # 3. Minimum number of user turns
-    user_turns_count = sum(
-        1 for turn in conv_data if turn.get("role") == "user"
-    )
+    user_turns_count = sum(1 for turn in conv_data if turn.get("role") == "user")
 
     if user_turns_count < min_turns:
         return False
@@ -128,12 +112,15 @@ def data_engineering_pipeline(input_csv: str, output_csv: str, min_turns: int, m
     chunk_iterator = pd.read_csv(input_csv, chunksize=batch_size)
 
     with tqdm(total=estimated_total_rows, desc="Hardcoded Filtering...", unit=" rows") as pbar:
-
         for chunk in chunk_iterator:
+            chunk = chunk.drop(columns=['turn', 'openai_moderation', 'redacted'], errors='ignore')
             mask = chunk.apply(lambda row: filter_conversation(row.to_dict(), min_turns, min_avg_tokens), axis=1)
             filtered_chunk = chunk[mask]
 
             if not filtered_chunk.empty:
+                filtered_chunk = filtered_chunk.copy()
+                filtered_chunk["conversation"] = filtered_chunk["conversation"].apply(normalize_conversation)
+
                 write_header = not os.path.exists(output_csv)
                 filtered_chunk.to_csv(output_csv, mode="a", index=False, header=write_header)
                 total_retained_rows += len(filtered_chunk)
