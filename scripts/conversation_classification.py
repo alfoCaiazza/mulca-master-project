@@ -90,15 +90,11 @@ def topic_continuity(user_turns, embeddings):
             "num_topics": 1,
             "topic_labels": [0] * len(user_turns),
             "average_cosine_similarity": float(np.mean([
-                cosine_similarity(
-                    embeddings[i].reshape(1, -1),
-                    embeddings[i + 1].reshape(1, -1)
-                )[0][0]
+                cosine_similarity(embeddings[i].reshape(1, -1),embeddings[i + 1].reshape(1, -1))[0][0]
                 for i in range(len(embeddings) - 1)
             ])) if len(embeddings) > 1 else np.nan,
             "topic_entropy": 0.0,
             "topic_switches": 0,
-            "topic_distribution": {0: len(user_turns)},
         }
 
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
@@ -123,30 +119,10 @@ def topic_continuity(user_turns, embeddings):
         "average_cosine_similarity": avg_similarity,
         "topic_entropy": topic_entropy,
         "topic_switches": topic_switches,
-        "topic_distribution": dict(topic_counts),
     }
 
 def analyze_conversation(conversation_id, conversation):
     user_turns = extract_user_turns(conversation)
-
-    if len(user_turns) < 2:
-        return {
-            "conversation_id": conversation_id,
-            "semantic_coherence": {"conversation_score": np.nan},
-            "referential_density": referential_density(conversation),
-            "topic_continuity": {
-                "num_topics": 1,
-                "topic_labels": [],
-                "average_cosine_similarity": np.nan,
-                "topic_entropy": 0.0,
-                "topic_switches": 0,
-                "topic_distribution": {}
-            },
-            "conversation_statistics": {
-                "num_turns": len(conversation),
-                "num_user_turns": len(user_turns),
-            }
-        }
 
     sc = semantic_coherence(user_turns)
     rd = referential_density(conversation)
@@ -187,7 +163,7 @@ if __name__ == "__main__":
             report = analyze_conversation( row.conversation_id, conversation)
             reports.append(report)
 
-        results_df = pd.json_normalize(reports)
+        results_df = pd.json_normalize(reports, sep="_")
         results_df.to_csv(output_file, mode="w" if first_chunk else "a", header=first_chunk,index=False, encoding="utf-8")
 
         first_chunk = False
