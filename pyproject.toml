@@ -13,6 +13,7 @@ dependencies = [
     "en-core-web-sm",
     "fastapi[standard]>=0.141.1",
     "hdbscan>=0.8.44",
+    "langid>=1.1.6",
     "matplotlib>=3.11.2",
     "nltk>=3.10.3",
     "numpy>=2.5.3",

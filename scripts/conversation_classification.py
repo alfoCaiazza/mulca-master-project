@@ -12,11 +12,61 @@ from tqdm import tqdm
 import ast
 
 REFERENCE_PATTERNS = [
-    "this", "that", "it", "these", "those",
-    "previous", "earlier", "above", "before",
-    "you said", "you mentioned", "as said",
-    "same", "again", "former", "latter"
+    # Demonstratives
+    "this", "that", "these", "those", "here", "there",
+
+    # Pronouns
+    "it", "its", "they", "them", "their",
+    "he", "she", "him", "her", "one", "ones",
+
+    # Conversation history
+    "previous", "previously", "earlier", "before",
+    "prior", "above", "below", "last time", "so far",
+
+    # Assistant references
+    "you said", "you mentioned", "you explained",
+    "you wrote", "you told me", "you suggested",
+    "your answer", "your explanation", "what you said",
+
+    # User self references
+    "i said", "i mentioned", "i asked",
+    "as i said", "as i mentioned", "my previous question",
+
+    # Continuation
+    "again", "same", "same thing", "same topic",
+    "continue", "go on", "follow up",
+    "expand on", "elaborate on",
+
+    # Comparative references
+    "former", "latter", "the former", "the latter",
+    "the first one", "the second one", "the other one",
+
+    # Contextual noun phrases
+    "the answer", "the response", "the explanation",
+    "the example", "the code", "the function",
+    "the model", "the prompt", "the output", "the result"
 ]
+
+QUESTION_WORDS = {
+    "what", "why", "how", "when", "where",
+    "who", "which", "whose", "whom", "is",
+    "are", "can", "could", "would", "should",
+    "do", "does", "did"
+}
+
+IMPERATIVE_VERBS = {
+    "explain", "describe", "summarize", "translate",
+    "write", "generate", "list", "compare", "analyze",
+    "give", "create", "show", "tell", "expand",
+    "continue", "rewrite", "improve", "calculate",
+    "classify", "extract", "find", "provide"
+}
+
+FOLLOWUP_PATTERNS = {
+    "continue", "expand", "elaborate", "follow up",
+    "what about", "and what", "also", "instead",
+    "go on", "more", "further"
+}
 
 def extract_user_turns(conversation):
     user_turns = []
@@ -29,6 +79,39 @@ def extract_user_turns(conversation):
             })
 
     return user_turns
+
+def extract_assistant_turns(conversation):
+    assistant_turns = []
+
+    for turn in conversation:
+        if turn["role"] == "assistant":
+            assistant_turns.append({
+                "content": turn["content"],
+                "embedding": np.array(turn["embedding"], dtype=float)
+            })
+
+    return assistant_turns
+
+def conversation_statistics(conversation):
+    user_lengths = []
+    assistant_lengths = []
+
+    for turn in conversation:
+        tokens = word_tokenize(turn["content"])
+
+        if turn["role"] == "user":
+            user_lengths.append(len(tokens))
+        else:
+            assistant_lengths.append(len(tokens))
+
+    return {
+        'num_turns' : len(conversation),
+        'num_user_turns' : len(user_lengths),
+        'avg_user_tokens' : np.mean(user_lengths) if user_lengths else 0,
+        'avg_assistant_tokens' :  np.mean(assistant_lengths) if assistant_lengths else 0,
+        'conversation_lenght_tokens': sum(user_lengths) + sum(assistant_lengths)
+    }
+    
 
 def semantic_coherence(user_turns):
     """
@@ -44,11 +127,18 @@ def semantic_coherence(user_turns):
         sim = cosine_similarity(embeddings[i].reshape(1, -1), embeddings[i + 1].reshape(1, -1))[0][0]
         pair_scores.append(float(sim))
 
-    conversation_score = (float(np.mean(pair_scores)) if pair_scores else 0.0)
+    semantic_mean = (float(np.mean(pair_scores)) if pair_scores else 0.0)
+    semantic_std = (float(np.std(pair_scores)) if pair_scores else 0.0)
+    semantic_min = (float(np.min(pair_scores)) if pair_scores else 0.0)
+    semantic_max = (float(np.max(pair_scores)) if pair_scores else 0.0)
+    semantic_path_lenght = (float(np.sum([1-s for s in pair_scores])) if pair_scores else 0.0)
 
     return {
-        "conversation_score": conversation_score,
-        "embeddings": embeddings,
+        "conversation_score": semantic_mean,
+        "semantic_std": semantic_std,
+        "semantic_min": semantic_min,
+        "semantic_max": semantic_max,
+        "semantic_path_lenght": semantic_path_lenght
     }
 
 def referential_density(conversation):
@@ -79,8 +169,8 @@ def optimal_topics(n_sentences):
 
     return max(2, min(8, round(np.sqrt(n_sentences / 2))))
 
-def topic_continuity(user_turns, embeddings):
-    embeddings = np.asarray(embeddings)
+def topic_continuity(user_turns):
+    embeddings = np.vstack([turn["embedding"] for turn in user_turns])
     n_clusters = optimal_topics(len(user_turns))
     unique_embeddings = np.unique(embeddings, axis=0)
     n_clusters = min(n_clusters, len(unique_embeddings))
@@ -119,29 +209,81 @@ def topic_continuity(user_turns, embeddings):
         "average_cosine_similarity": avg_similarity,
         "topic_entropy": topic_entropy,
         "topic_switches": topic_switches,
+        "topic_switches_rate" : topic_switches / (len(user_turns) - 1)
+    }
+
+def classify_request_type(text: str) -> str:
+    text_lower = text.lower().strip()
+    tokens = word_tokenize(text_lower)
+
+    if "?" in text_lower:
+        return "question"
+
+    if tokens and tokens[0] in QUESTION_WORDS:
+        return "question"
+
+    for pattern in FOLLOWUP_PATTERNS:
+        if pattern in text_lower:
+            return "follow_up"
+
+    if tokens and tokens[0] in IMPERATIVE_VERBS:
+        return "instruction"
+
+    return "other"
+
+
+def intent_diversity(conversation, user_turns):
+    request_types = []
+    question_count = 0
+    imperative_count = 0
+
+    for turn in user_turns:
+        text = turn["content"]
+        text_lower = text.lower()
+        tokens = word_tokenize(text_lower)
+        request_type = classify_request_type(text)
+        request_types.append(request_type)
+
+        # Question count
+        if request_type == "question":
+            question_count += 1
+
+        # Imperative count
+        if tokens and tokens[0] in IMPERATIVE_VERBS:
+            imperative_count += 1
+
+    counts = Counter(request_types)
+    probs = np.array(list(counts.values()), dtype=float)
+
+    if len(probs) > 0:
+        probs /= probs.sum()
+        request_entropy = float(entropy(probs, base=2))
+    else:
+        request_entropy = 0.0
+
+    return {
+        "question_count": question_count,
+        "imperative_count": imperative_count,
+        "request_type_entropy": request_entropy,
+        "request_type_distribution": dict(counts)
     }
 
 def analyze_conversation(conversation_id, conversation):
     user_turns = extract_user_turns(conversation)
 
+    cs = conversation_statistics(conversation)
     sc = semantic_coherence(user_turns)
     rd = referential_density(conversation)
-    tc = topic_continuity(
-        [t["content"] for t in user_turns],
-        sc["embeddings"]
-    )
+    tc = topic_continuity(user_turns)
+    idv = intent_diversity(conversation, user_turns)
 
     return {
         "conversation_id": conversation_id,
-        "semantic_coherence": {
-            "conversation_score": sc["conversation_score"]
-        },
+        "conversation_statistics": cs,
+        "semantic_coherence": sc,
         "referential_density": rd,
         "topic_continuity": tc,
-        "conversation_statistics": {
-            "num_turns": len(conversation),
-            "num_user_turns": len(user_turns),
-        }
+        "intent_diversity": idv,
     }
 
 if __name__ == "__main__":
