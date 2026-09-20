@@ -5,12 +5,28 @@ import html
 import pandas as pd
 from transformers import AutoTokenizer
 from tqdm import tqdm
+import langid
 
 tokenizer = AutoTokenizer.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0")
 
 # ----------------------------
 # Utilities
 # ----------------------------
+def detect_conversation_language(conversation: list) -> str:
+    texts = []
+
+    for turn in conversation:
+        content = normalize_message(turn.get("content", ""))
+        if content:
+            texts.append(content)
+
+    if not texts:
+        return "unknown"
+
+    text = " ".join(texts)[:4000]
+    lang, score = langid.classify(text)
+
+    return lang
 
 def normalize_message(text: str) -> str:
     if not isinstance(text, str):
@@ -78,14 +94,14 @@ def get_avg_user_token_count(conversation: list) -> float:
     return total_tokens / len(user_turns)
 
 def filter_conversation(row: dict, min_turns: int, min_avg_tokens: float) -> bool:
-    # 1. English language filter
-    language = row.get("language")
-    if not language or language.lower() not in ("english", "en"):
-        return False
-
-    # 2. Parse conversation
+    # 1. Parse conversation
     conv_data = row.get("conversation", [])
     conv_data = ast.literal_eval(conv_data)
+
+    # 2. English language filter
+    detected_language = detect_conversation_language(conv_data)
+    if detected_language != "en":
+        return False
 
     # 3. Minimum number of user turns
     user_turns_count = sum(1 for turn in conv_data if turn.get("role") == "user")
@@ -113,7 +129,7 @@ def data_engineering_pipeline(input_csv: str, output_csv: str, min_turns: int, m
 
     with tqdm(total=estimated_total_rows, desc="Hardcoded Filtering...", unit=" rows") as pbar:
         for chunk in chunk_iterator:
-            chunk = chunk.drop(columns=['turn', 'openai_moderation', 'redacted'], errors='ignore')
+            chunk = chunk.drop(columns=['language', 'turn', 'openai_moderation', 'redacted'], errors='ignore')
             mask = chunk.apply(lambda row: filter_conversation(row.to_dict(), min_turns, min_avg_tokens), axis=1)
             filtered_chunk = chunk[mask]
 
