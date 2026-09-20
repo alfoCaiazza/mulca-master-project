@@ -4,20 +4,23 @@ import json
 import os
 from tqdm import tqdm 
 
+def clear_terminal():
+    os.system("cls" if os.name == "nt" else "clear")
+
 def random_splits_selection(metrics: pd.DataFrame, samples_per_group: int = 100) -> pd.DataFrame:
     metrics = metrics.copy()
 
     # Quartiles for the main metrics
-    quartile_features = {
-        "semantic_coherence": "sc_q",
+    quartiles = {
+        "semantic_coherence_conversation_score": "sc_q",
         "referential_density_score": "rd_q",
         "topic_continuity_topic_entropy": "entropy_q",
-        "topic_continuity_topic_switch_rate": "switch_q",
+        "topic_continuity_topic_switches_rate": "switch_q",
         "conversation_statistics_num_user_turns": "turns_q",
         "intent_diversity_request_type_entropy": "intent_q",
     }
 
-    for feature, qname in quartile_features.items():
+    for feature, qname in quartiles.items():
         metrics[qname] = pd.qcut(metrics[feature], q=4, labels=False, duplicates="drop")
 
     def safe_sample(df, n):
@@ -62,13 +65,13 @@ def random_splits_selection(metrics: pd.DataFrame, samples_per_group: int = 100)
     # ------------------------------------------------------------------
     # 4. Outliers / Edge cases
     # ------------------------------------------------------------------
-    switch_threshold = metrics["topic_continuity_topic_switch_rate"].quantile(0.95)
-    path_threshold = metrics["semantic_coherence_semantic_path_length"].quantile(0.95)
+    switch_threshold = metrics["topic_continuity_topic_switches_rate"].quantile(0.95)
+    path_threshold = metrics["semantic_coherence_semantic_path_lenght"].quantile(0.95)
 
     outliers = metrics[
         ((metrics.sc_q == metrics.sc_q.max()) & (metrics.entropy_q == metrics.entropy_q.max())) |
-        (metrics["topic_continuity_topic_switch_rate"] >= switch_threshold) |
-        (metrics["semantic_coherence_semantic_path_length"] >= path_threshold) |
+        (metrics["topic_continuity_topic_switches_rate"] >= switch_threshold) |
+        (metrics["semantic_coherence_semantic_path_lenght"] >= path_threshold) |
         ((metrics.rd_q == metrics.rd_q.max()) & (metrics.intent_q == metrics.intent_q.max()))
     ].copy()
 
@@ -87,7 +90,7 @@ def random_splits_selection(metrics: pd.DataFrame, samples_per_group: int = 100)
     selected = selected.drop_duplicates(subset="conversation_id", keep="first")
     selected = selected.sample(frac=1, random_state=42).reset_index(drop=True)
 
-    return selected[["conversation_id", "sampling_group"]]
+    return selected[["conversation_id"]]
 
 def annotate_conversations(conversations:pd.DataFrame, conversation_ids: list, output_file:str, shuffle:bool = True)-> pd.DataFrame:
     # Keep only selected conversations
@@ -135,6 +138,8 @@ def annotate_conversations(conversations:pd.DataFrame, conversation_ids: list, o
 
                 gold_df = pd.concat([gold_df, new_row], ignore_index=True)
                 gold_df.to_csv(output_file, index=False, encoding="utf-8")
+
+                clear_terminal()
                 break
             elif label == "q":
                 print("\nStopping annotation. Progress saved.")
@@ -148,13 +153,14 @@ def annotate_conversations(conversations:pd.DataFrame, conversation_ids: list, o
 if __name__ =="__main__":
     metrics_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "results", "CLASSIFICATION_METRICS.csv",))
     conversations_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "filtered", "FILTERED.csv",))
-    output_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "gold_set", "GOLD_SET.csv",))
+    output_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "gold_set", "METRIC_BASED_GOLD_SET.csv",))
 
     print("Loading metrics and conversations ...")
     metrics = pd.read_csv(metrics_file)
     conversations = pd.read_csv(conversations_file)
 
-    selected_df = random_splits_selection(metrics=metrics)
-    annotate_conversations(conversations=conversations, conversation_ids=selected_df["conversation_id"].tolist(), output_file=output_file)
+    selected_conv_list = random_splits_selection(metrics=metrics)
+    selected_conv_list.to_csv(output_file, index=False)
+    # annotate_conversations(conversations=conversations, conversation_ids=selected_df["conversation_id"].tolist(), output_file=output_file)
     print("Operation completed successfully!")
 
