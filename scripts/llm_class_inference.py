@@ -14,46 +14,67 @@ MODEL_NAME = "llama3.1:8b"
 CONCURRENCY_LIMIT = 2
 BATCH_SIZE = 10
 
-def build_system_prompt() -> str:
-    return """You are annotating conversations for a binary classification dataset.
+def build_system_prompt():
+    return """You are an expert annotator for a conversational conditioning dataset.
 
     Task:
-    Classify the ENTIRE conversation into one of two classes.
+    Detect whether the USER introduces conditioning that persistently changes the assistant's behavior or reasoning during the conversation.
 
     Definition:
+    Conditioning is information introduced by the USER that becomes persistent conversational context and influences one or more subsequent assistant responses.
 
-    dialogue_like = 1
-    The conversation is context-dependent. The user's later messages rely on previous turns,
-    refine previous requests, ask follow-up questions, or continue discussing the same topic.
+    Important distinction:
+    - Conditioning = persistent change in behavior, persona, framing, reasoning, or preferences.
+    - Context continuation alone is NOT conditioning. Continuing a writing task or answering a follow-up question does not count unless the user changes the assistant's behavior or assumptions.
 
-    dialogue_like = 0
-    The conversation is mainly a sequence of independent queries. Each user message could be
-    answered without knowing the previous conversation, even if topics are related.
+    Conditioning categories (MULTILABEL: select ALL that apply):
 
-    Guidelines:
+    1. persona
+    The user assigns the assistant an identity, character, profession, or role.
+    Examples: "You are Ahsoka.", "Act as my therapist.", "You are a geography bot."
 
-    Label 1 if the conversation contains:
-    - follow-up questions,
-    - contextual references ("this", "that", "you said", "previously", etc.),
-    - refinements or corrections of previous requests,
-    - continuation on the same topic across multiple user turns.
+    2. behavioral
+    The user imposes persistent rules about how the assistant must respond.
+    Examples: "Always answer in one sentence.", "Only reply with capital cities.", "Never use bullet points."
 
-    Label 0 if:
-    - user requests are independent,
-    - there are abrupt topic changes,
-    - the assistant context is not required to interpret later turns.
+    3. preference
+    The user specifies persistent preferences that should be remembered.
+    Examples: "Use British English.", "Call me Alex.", "Always use metric units."
 
-    Return ONLY valid JSON in the format:
+    4. framing
+    The user establishes persistent assumptions, world state, fictional context, or facts that subsequent responses adopt.
+    Examples: roleplay settings, fictional worlds, "Assume gravity stopped working."
+
+    5. reasoning
+    The user changes or constrains the assistant's reasoning process.
+    Examples: correcting a mathematical recurrence, imposing reasoning rules, changing decision criteria.
+
+    Negative examples (conditioning_present = false):
+    - "Write chapter 5 of the outline above."
+    - "Continue the story."
+    - "Explain that paragraph."
+    - Ordinary follow-up questions without persistent behavioral or contextual changes.
+
+    Output ONLY valid JSON with this schema:
 
     {
-        "dialogue_like": 1
+    "conditioning_present": true,
+    "conditioning_type": ["persona", "behavioral"],
+    "source_turn": 1,
+    "affected_turns": [2,4,6],
+    "confidence": 0.94,
+    "evidence": "The user instructs the assistant to act as a geography bot and follow persistent response rules."
     }
 
-    or
-
-    {
-        "dialogue_like": 0
-    }
+    Rules:
+    - conditioning_present is a boolean.
+    - conditioning_type is an array and may contain MULTIPLE categories.
+    - Use an empty array if conditioning_present is false.
+    - source_turn is the first USER turn introducing the conditioning.
+    - affected_turns contains only ASSISTANT turn numbers influenced by that conditioning.
+    - confidence is a number between 0.0 and 1.0.
+    - evidence must be one concise sentence (maximum 25 words).
+    - Do not infer conditioning unless there is clear evidence of persistence.
     """
 
 def build_user_prompt(conversation) -> str:
@@ -68,7 +89,8 @@ def build_user_prompt(conversation) -> str:
     return f"""Classify the following conversation. Conversation: {conversation_text}
     Return only the JSON object."""
 
-async def fetch_classification(session, conversation, semaphore):
+async def fetch_annotation(session, conversation, semaphore, max_retries=3):
+
     payload = {
         "model": MODEL_NAME,
         "system": build_system_prompt(),
@@ -78,38 +100,55 @@ async def fetch_classification(session, conversation, semaphore):
         "options": {
             "temperature": 0.0,
             "seed": 42,
-            "num_predict": 20
+            "num_predict": 200
         }
     }
 
     async with semaphore:
-        try:
-            async with session.post(
-                f"{BACKEND_URL}/api/generate",
-                json=payload
-            ) as response:
+        for attempt in range(max_retries):
+            try:
+                async with session.post(
+                    f"{BACKEND_URL}/api/generate",
+                    json=payload
+                ) as response:
 
-                if response.status != 200:
-                    return {"dialogue_like": None}
+                    if response.status != 200:
+                        raise RuntimeError()
 
-                data = await response.json()
+                    data = await response.json()
+                    result = json.loads(data["response"])
 
-                try:
-                    return json.loads(data["response"])
-                except json.JSONDecodeError:
-                    return {"dialogue_like": None}
+                    return {
+                        "conditioning_present": bool(result.get("conditioning_present")),
+                        "conditioning_type": ",".join(result.get("conditioning_type", [])),
+                        "source_turn": result.get("source_turn"),
+                        "affected_turns": ",".join(map(str, result.get("affected_turns", []))),
+                        "confidence": result.get("confidence"),
+                        "evidence": result.get("evidence")
+                    }
 
-        except Exception:
-            return {"dialogue_like": None}
+            except Exception:
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                else:
+                    return {
+                        "conditioning_present": None,
+                        "conditioning_type": None,
+                        "source_turn": None,
+                        "affected_turns": None,
+                        "confidence": None,
+                        "evidence": None
+                    }
 
 async def process_batch(df_batch, session, semaphore):
     conversations = [ast.literal_eval(conv) for conv in df_batch["conversation"]]
-    tasks = [fetch_classification(session, conv, semaphore) for conv in conversations]
+    tasks = [fetch_annotation(session, conv, semaphore) for conv in conversations]
 
     results = await asyncio.gather(*tasks)
 
     processed = df_batch.copy()
-    processed["dialogue_like"] = [r.get("dialogue_like") for r in results]
+    for key in results[0].keys():
+        processed[key] = [r[key] for r in results]
 
     return processed
 
@@ -125,7 +164,7 @@ async def enrich_dataset_async(df, output_path):
             processed_chunk.to_csv(output_path, mode="a", header=not os.path.exists(output_path), index=False)
 
 if __name__ == "__main__":
-    input_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "gold_set", "METRIC_BASED_GOLD_SET.csv"))
+    input_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "gold_set", "CONDITIONING_GOLD_SET.csv"))
     conversations_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "filtered", "FILTERED.csv"))
     output_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "gold_set", "LLM_ANNOTATES_GOLD_SET.csv",))
     metrics_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "results", "CLASSIFICATION_METRICS.csv",))
@@ -139,11 +178,12 @@ if __name__ == "__main__":
     print(f"Starting LLM classification with {MODEL_NAME} model ...")
     asyncio.run(enrich_dataset_async(conversations, output_file))
 
-    # Open metrics file and add llm labels
-    metrics = pd.read_csv(metrics_file)
-    annotations = pd.read_csv(output_file)
+    # # Open metrics file and add llm labels
+    # metrics = pd.read_csv(metrics_file)
+    # annotations = pd.read_csv(output_file)
 
-    annotations = annotations.merge(metrics, on="conversation_id", how="left")
-    annotations.to_csv(output_file, index=False)
+    # annotations = annotations.merge(metrics, on="conversation_id", how="left", suffixes=("", "_dup"))
+    # annotations = annotations.loc[:, ~annotations.columns.str.endswith("_dup")]
+    # annotations.to_csv(output_file, index=False)
 
     print("Annotation completed.")

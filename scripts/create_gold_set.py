@@ -1,166 +1,186 @@
 import pandas as pd
 import ast
-import json
 import os
-from tqdm import tqdm 
+from tqdm import tqdm
 
 def clear_terminal():
     os.system("cls" if os.name == "nt" else "clear")
 
 def random_splits_selection(metrics: pd.DataFrame, samples_per_group: int = 100) -> pd.DataFrame:
+
     metrics = metrics.copy()
 
-    # Quartiles for the main metrics
-    quartiles = {
+    features = {
         "semantic_coherence_conversation_score": "sc_q",
-        "referential_density_score": "rd_q",
-        "topic_continuity_topic_entropy": "entropy_q",
+        "context_dependency_context_dependency_score": "context_q",
+        "topic_persistence_avg_segment_length": "persist_q",
+        "semantic_drift_mean_from_first": "drift_q",
         "topic_continuity_topic_switches_rate": "switch_q",
-        "conversation_statistics_num_user_turns": "turns_q",
-        "intent_diversity_request_type_entropy": "intent_q",
+        "topic_continuity_topic_entropy": "entropy_q",
+        "response_alignment_mean": "align_q",
     }
 
-    for feature, qname in quartiles.items():
-        metrics[qname] = pd.qcut(metrics[feature], q=4, labels=False, duplicates="drop")
+    for feature, q in features.items():
+        metrics[q] = pd.qcut(metrics[feature],
+                             q=4,
+                             labels=False,
+                             duplicates="drop")
 
-    def safe_sample(df, n):
-        return df.sample(min(len(df), n), random_state=42)
+    def sample(df):
+        return df.sample(min(len(df), samples_per_group),
+                         random_state=42)
 
-    # ------------------------------------------------------------------
-    # 1. High-confidence Dialogue-like
-    # ------------------------------------------------------------------
-    dialogue = metrics[
-        (metrics.sc_q == metrics.sc_q.max()) &
-        (metrics.rd_q == metrics.rd_q.max()) &
-        (metrics.entropy_q == metrics.entropy_q.min()) &
-        (metrics.switch_q <= 1)
+    # ---------------------------------------------------
+    # 1. Candidate Conditioning (positivi attesi)
+    # ---------------------------------------------------
+    high_context = metrics[
+        (metrics.context_q >= 2) &
+        (metrics.persist_q >= 2) &
+        (metrics.sc_q >= 2) &
+        (metrics.switch_q <= 1) &
+        (metrics.entropy_q <= 1)
     ].copy()
 
-    dialogue["sampling_group"] = "high_dialogue"
+    high_context["sampling_group"] = "high_context"
 
-    # ------------------------------------------------------------------
-    # 2. High-confidence Query-like
-    # ------------------------------------------------------------------
-    query = metrics[
-        (metrics.sc_q == metrics.sc_q.min()) &
-        (metrics.rd_q == metrics.rd_q.min()) &
-        (metrics.entropy_q == metrics.entropy_q.max()) &
-        (metrics.switch_q >= metrics.switch_q.max() - 1)
+    # ---------------------------------------------------
+    # 2. Candidate No Conditioning (negativi attesi)
+    # ---------------------------------------------------
+    high_reset = metrics[
+        (metrics.switch_q >= 2) &
+        (metrics.drift_q >= 2) &
+        (metrics.context_q <= 1) &
+        (metrics.persist_q <= 1)
     ].copy()
 
-    query["sampling_group"] = "high_query"
+    high_reset["sampling_group"] = "high_reset"
 
-    # ------------------------------------------------------------------
-    # 3. Ambiguous / Middle conversations
-    # ------------------------------------------------------------------
-    liminal = metrics[
+    # ---------------------------------------------------
+    # 3. Ambiguous Conversations
+    # ---------------------------------------------------
+    ambiguous = metrics[
+        metrics.context_q.isin([1, 2]) &
+        metrics.persist_q.isin([1, 2]) &
         metrics.sc_q.isin([1, 2]) &
-        metrics.rd_q.isin([1, 2]) &
-        metrics.entropy_q.isin([1, 2]) &
-        metrics.intent_q.isin([1, 2])
+        metrics.switch_q.isin([1, 2])
     ].copy()
 
-    liminal["sampling_group"] = "liminal"
+    ambiguous["sampling_group"] = "ambiguous"
 
-    # ------------------------------------------------------------------
-    # 4. Outliers / Edge cases
-    # ------------------------------------------------------------------
-    switch_threshold = metrics["topic_continuity_topic_switches_rate"].quantile(0.95)
-    path_threshold = metrics["semantic_coherence_semantic_path_lenght"].quantile(0.95)
-
-    outliers = metrics[
-        ((metrics.sc_q == metrics.sc_q.max()) & (metrics.entropy_q == metrics.entropy_q.max())) |
-        (metrics["topic_continuity_topic_switches_rate"] >= switch_threshold) |
-        (metrics["semantic_coherence_semantic_path_lenght"] >= path_threshold) |
-        ((metrics.rd_q == metrics.rd_q.max()) & (metrics.intent_q == metrics.intent_q.max()))
-    ].copy()
-
-    outliers["sampling_group"] = "outlier"
-
-    # ------------------------------------------------------------------
-    # Balanced sampling
-    # ------------------------------------------------------------------
     selected = pd.concat([
-        safe_sample(dialogue, samples_per_group),
-        safe_sample(query, samples_per_group),
-        safe_sample(liminal, samples_per_group),
-        safe_sample(outliers, samples_per_group),
+        sample(high_context),
+        sample(high_reset),
+        sample(ambiguous)
     ])
 
-    selected = selected.drop_duplicates(subset="conversation_id", keep="first")
-    selected = selected.sample(frac=1, random_state=42).reset_index(drop=True)
+    selected = (
+        selected
+        .drop_duplicates("conversation_id")
+        .sample(frac=1, random_state=42)
+        .reset_index(drop=True)
+    )
 
-    return selected[["conversation_id"]]
+    return selected[["conversation_id", "sampling_group"]]
 
-def annotate_conversations(conversations:pd.DataFrame, conversation_ids: list, output_file:str, shuffle:bool = True)-> pd.DataFrame:
-    # Keep only selected conversations
-    annotation_df = conversations[conversations["conversation_id"].isin(conversation_ids)][["conversation_id", "conversation"]].copy()
+def annotate_conversations(conversations: pd.DataFrame, sampled: pd.DataFrame, output_file: str, shuffle=True):
 
-    # Search for previous annotations
+    annotation_df = conversations.merge(sampled, on="conversation_id", how="inner")
+
+    annotation_df = annotation_df[
+        ["conversation_id", "conversation", "sampling_group"]
+    ]
+
     if os.path.exists(output_file):
         gold_df = pd.read_csv(output_file)
         print(f"Loaded {len(gold_df)} previous annotations.")
     else:
-        gold_df = pd.DataFrame(columns=["conversation_id", "conversation", "dialogue_like"])
-        print("No previous annotation file found.")
+        gold_df = pd.DataFrame(columns=[
+            "conversation_id",
+            "conversation",
+            "sampling_group",
+            "conditioning_present",
+            "conditioning_type",
+            "source_turn",
+            "affected_turns",
+            "confidence",
+            "notes"
+        ])
 
-    annotated_ids = set(gold_df["conversation_id"])
-    annotation_df = annotation_df[~annotation_df["conversation_id"].isin(annotated_ids)].copy()
+    done = set(gold_df["conversation_id"])
+    annotation_df = annotation_df[~annotation_df["conversation_id"].isin(done)].copy()
 
     if shuffle:
         annotation_df = annotation_df.sample(frac=1, random_state=42).reset_index(drop=True)
 
-    print(f"{len(annotation_df)} conversations left to annotate.\n")
+    print(f"{len(annotation_df)} conversations left.\n")
 
-    # Annotation loop
-    for _, row in tqdm(annotation_df.iterrows(), total=len(annotation_df), desc="Annotating conversations"):
-        print("\n" + "=" * 80)
-        print(f"Conversation ID: {row.conversation_id}")
-        print("=" * 80)
+    for _, row in tqdm(annotation_df.iterrows(), total=len(annotation_df)):
+        clear_terminal()
+
+        print("=" * 90)
+        print("Conversation:", row.conversation_id)
+        print("Sampling group:", row.sampling_group)
+        print("=" * 90)
 
         conversation = ast.literal_eval(row.conversation)
 
-        for turn in conversation:
-            print(f"\n[{turn['role'].upper()}]")
+        for i, turn in enumerate(conversation, start=1):
+            print(f"\nTURN {i} [{turn['role'].upper()}]")
             print(turn["content"])
 
-        print("\n" + "-" * 80)
+        print("\n" + "-" * 90)
 
-        while True:
-            label = input("Dialogue-like? [1 = Yes | 0 = No | q = Quit]: ").strip().lower()
+        label = input("Conditioning present? [1=yes / 0=no / q=quit]: ").strip().lower()
 
-            if label in ("0", "1"):
-                new_row = pd.DataFrame([{
-                    "conversation_id": row.conversation_id,
-                    "conversation": row.conversation,
-                    "dialogue_like": int(label)
-                }])
+        if label == "q":
+            gold_df.to_csv(output_file, index=False, encoding="utf-8")
+            return gold_df
 
-                gold_df = pd.concat([gold_df, new_row], ignore_index=True)
-                gold_df.to_csv(output_file, index=False, encoding="utf-8")
+        if label not in ("0", "1"):
+            continue
 
-                clear_terminal()
-                break
-            elif label == "q":
-                print("\nStopping annotation. Progress saved.")
-                return gold_df
-            else:
-                print("Insert 1, 0 or q.")
+        conditioning_present = int(label)
 
-    print("\nAnnotation completed.")
+        if conditioning_present:
+            conditioning_type = input("Type (comma separated: persona, preference, framing, reasoning, behavioral): ").strip()
+            source_turn = input("Source turn (integer): ").strip()
+            affected_turns = input("Affected turns (e.g. 4,5,6): ").strip()
+        else:
+            conditioning_type = ""
+            source_turn = ""
+            affected_turns = ""
+
+        confidence = input("Confidence [1-3]: ").strip()
+        notes = input("Notes (optional): ").strip()
+
+        gold_df = pd.concat([
+            gold_df,
+            pd.DataFrame([{
+                "conversation_id": row.conversation_id,
+                "conversation": row.conversation,
+                "sampling_group": row.sampling_group,
+                "conditioning_present": conditioning_present,
+                "conditioning_type": conditioning_type,
+                "source_turn": source_turn,
+                "affected_turns": affected_turns,
+                "confidence": confidence,
+                "notes": notes
+            }])
+        ], ignore_index=True)
+
+        gold_df.to_csv(output_file, index=False, encoding="utf-8")
+
     return gold_df
 
-if __name__ =="__main__":
-    metrics_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "results", "CLASSIFICATION_METRICS.csv",))
-    conversations_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "filtered", "FILTERED.csv",))
-    output_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "gold_set", "METRIC_BASED_GOLD_SET.csv",))
+if __name__ == "__main__":
+    metrics_file = "../results/CLASSIFICATION_METRICS.csv"
+    conversations_file = "../data/filtered/FILTERED.csv"
+    output_file = "../data/gold_set/CONDITIONING_GOLD_SET.csv"
 
-    print("Loading metrics and conversations ...")
     metrics = pd.read_csv(metrics_file)
     conversations = pd.read_csv(conversations_file)
 
-    selected_conv_list = random_splits_selection(metrics=metrics)
-    selected_conv_list.to_csv(output_file, index=False)
-    # annotate_conversations(conversations=conversations, conversation_ids=selected_df["conversation_id"].tolist(), output_file=output_file)
-    print("Operation completed successfully!")
+    sampled = random_splits_selection(metrics, samples_per_group=100)
+    sampled.to_csv(output_file, index=False)
 
+    # annotate_conversations(conversations, sampled, output_file)

@@ -68,6 +68,22 @@ FOLLOWUP_PATTERNS = {
     "go on", "more", "further"
 }
 
+ANAPHORA = {
+    "this", "that", "these", "those",
+    "it", "they", "them", "their"
+}
+
+MEMORY_REFERENCES = {
+    "previous", "earlier", "before",
+    "you said", "you mentioned",
+    "as i said", "my previous question"
+}
+
+CONTINUATION = {
+    "continue", "again", "expand",
+    "elaborate", "go on", "same"
+}
+
 def extract_user_turns(conversation):
     user_turns = []
 
@@ -264,8 +280,130 @@ def intent_diversity(conversation, user_turns):
     return {
         "question_count": question_count,
         "imperative_count": imperative_count,
-        "request_type_entropy": request_entropy,
-        "request_type_distribution": dict(counts)
+        "request_type_entropy": request_entropy
+    }
+
+# New metrics
+def response_alignment(conversation):
+    similarities = []
+
+    for i in range(len(conversation) - 1):
+        current_turn = conversation[i]
+        next_turn = conversation[i + 1]
+
+        if current_turn["role"] == "user" and next_turn["role"] == "assistant":
+            u = np.array(current_turn["embedding"], dtype=float)
+            a = np.array(next_turn["embedding"], dtype=float)
+
+            sim = cosine_similarity(
+                u.reshape(1, -1),
+                a.reshape(1, -1)
+            )[0][0]
+
+            similarities.append(sim)
+
+    if not similarities:
+        return {
+            "mean": 0.0,
+            "std": 0.0,
+            "min": 0.0,
+            "max": 0.0
+        }
+
+    return {
+        "mean": float(np.mean(similarities)),
+        "std": float(np.std(similarities)),
+        "min": float(np.min(similarities)),
+        "max": float(np.max(similarities))
+    }
+
+def semantic_drift(user_turns):
+    embeddings = [turn["embedding"] for turn in user_turns]
+
+    if len(embeddings) < 2:
+        return {
+            "first_last": 0.0,
+            "mean_from_first": 0.0,
+            "std_from_first": 0.0
+        }
+
+    first = embeddings[0]
+
+    similarities = []
+
+    for emb in embeddings[1:]:
+        similarities.append(
+            cosine_similarity(
+                first.reshape(1, -1),
+                emb.reshape(1, -1)
+            )[0][0]
+        )
+
+    first_last = similarities[-1]
+
+    return {
+        "first_last": float(1 - first_last),
+        "mean_from_first": float(1 - np.mean(similarities)),
+        "std_from_first": float(np.std(similarities))
+    }
+
+def topic_persistence(topic_labels):
+    if len(topic_labels) <= 1:
+        return {
+            "avg_segment_length": 1,
+            "max_segment_length": 1,
+            "single_visit_topics": 1
+        }
+
+    segment_lengths = []
+    current_length = 1
+
+    for i in range(1, len(topic_labels)):
+        if topic_labels[i] == topic_labels[i-1]:
+            current_length += 1
+        else:
+            segment_lengths.append(current_length)
+            current_length = 1
+
+    segment_lengths.append(current_length)
+
+    topic_counts = Counter(topic_labels)
+
+    single_visit_topics = sum(v == 1 for v in topic_counts.values())
+
+    return {
+        "avg_segment_length": float(np.mean(segment_lengths)),
+        "max_segment_length": int(np.max(segment_lengths)),
+        "single_visit_topics": int(single_visit_topics)
+    }
+
+def context_dependency(user_turns):
+    anaphora = 0
+    memory = 0
+    continuation = 0
+    total_tokens = 0
+
+    for turn in user_turns:
+        text = turn["content"].lower()
+        tokens = word_tokenize(text)
+
+        total_tokens += len(tokens)
+
+        anaphora += sum(t in ANAPHORA for t in tokens)
+
+        for p in MEMORY_REFERENCES:
+            memory += len(re.findall(re.escape(p), text))
+
+        for p in CONTINUATION:
+            continuation += len(re.findall(re.escape(p), text))
+
+    total_refs = anaphora + memory + continuation
+
+    return {
+        "anaphora_rate": anaphora / max(total_tokens, 1),
+        "memory_rate": memory / max(total_tokens, 1),
+        "continuation_rate": continuation / max(total_tokens, 1),
+        "context_dependency_score": total_refs / max(total_tokens, 1)
     }
 
 def analyze_conversation(conversation_id, conversation):
@@ -274,8 +412,15 @@ def analyze_conversation(conversation_id, conversation):
     cs = conversation_statistics(conversation)
     sc = semantic_coherence(user_turns)
     rd = referential_density(conversation)
+
     tc = topic_continuity(user_turns)
+    tp = topic_persistence(tc["topic_labels"])
+
     idv = intent_diversity(conversation, user_turns)
+
+    ra = response_alignment(conversation)
+    sd = semantic_drift(user_turns)
+    cd = context_dependency(user_turns)
 
     return {
         "conversation_id": conversation_id,
@@ -283,7 +428,11 @@ def analyze_conversation(conversation_id, conversation):
         "semantic_coherence": sc,
         "referential_density": rd,
         "topic_continuity": tc,
+        "topic_persistence": tp,
         "intent_diversity": idv,
+        "response_alignment": ra,
+        "semantic_drift": sd,
+        "context_dependency": cd,
     }
 
 if __name__ == "__main__":
