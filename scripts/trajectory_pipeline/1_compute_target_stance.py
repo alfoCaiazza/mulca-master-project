@@ -58,8 +58,8 @@ def compute_stance_scores(target_df, evaluator):
     return pd.concat( [df, scores_df], axis=1)
 
 def main():
-    input_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "generative", "TARGET_TURNS.csv"))
-    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "generative", "results"))
+    input_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "generative", "TARGET_TURNS.csv"))
+    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "generative", "results"))
 
     os.makedirs(output_dir, exist_ok=True)
 
