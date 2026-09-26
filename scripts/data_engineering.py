@@ -290,3 +290,6 @@ def main():
         if not issues_df.empty
         else "No structural issues found."
     )
+
+if __name__ == "__main__":
+    main()

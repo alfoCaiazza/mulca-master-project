@@ -8,8 +8,7 @@ import os
 import textwrap
 
 BACKEND_URL = "http://localhost:11434"
-# , "mistral:7b", "qwen2.5:7b", "gemma2:9b"
-MODELS = ["llama3.1:8b"]
+MODELS = ["llama3.1:8b", "mistral:7b", "qwen2.5:7b", "gemma2:9b"]
 
 # Defining ATTACKER-TARGET prompts
 ATTACKER_PERSONAS = [
@@ -358,26 +357,33 @@ async def run_simulation(model:str, session_id: str, claim: str, claim_category:
 async def main():
     output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "generative",))
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
     output_file = os.path.join(output_path, "CONVERSATIONS.csv")
 
-    N_SIMULATIONS = 1
+    N_SIMULATIONS = 50
+    n_categories = len(CLAIMS)
+    N_SIMULATIONS_PER_CATEGORY = N_SIMULATIONS // n_categories
+
+    schedule = []
+
+    for claim_data in CLAIMS:
+        for i in range(N_SIMULATIONS_PER_CATEGORY):
+            schedule.append({
+                "category": claim_data["category"],
+                "claim": random.choice(claim_data["topics"])
+            })
+
+    random.shuffle(schedule)
 
     for model in MODELS:
         async with aiohttp.ClientSession() as session:
-            for i in tqdm(range(N_SIMULATIONS), desc=f"Simulating conversations with {model} model..."):
-                max_turns = random.randint(8, 12)
-                claim_data = random.choice(CLAIMS)
-                claim_category = claim_data["category"]
-                claim = random.choice(claim_data["topics"])
-
+            for i, job in enumerate(tqdm(schedule, desc=f"Simulating conversations with {model} model...")):
                 result = await run_simulation(
                     model=model,
                     session_id=f"sim_{i:03d}",
-                    claim=claim,
-                    claim_category=claim_category,
+                    claim=job['claim'],
+                    claim_category=job['category'],
                     http_session=session,
-                    max_turns=max_turns
+                    max_turns= random.randint(8, 12)
                 )
 
                 # Serialize history so it is stored cleanly in one CSV cell
