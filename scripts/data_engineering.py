@@ -254,18 +254,37 @@ def validate_turns_df(turns_df):
 
     return pd.DataFrame(issues)
 
+def build_target_df(turns_df):
+    target_df = (
+        turns_df[turns_df["speaker"].eq("target")]
+        .copy()
+        .sort_values(["session_id", "target_turn_index"])
+    )
+
+    target_df["n_target_turns"] = (target_df
+        .groupby("session_id")["target_turn_index"]
+        .transform("max")
+    )
+
+    target_df["t"] = (target_df["target_turn_index"] / target_df["n_target_turns"])
+
+    return target_df
+
 def main():
     input_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "generative", "CONVERSATIONS.csv",))
     output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "generative",))
     turns_df_file = os.path.join(output_path, "TURNS.csv")
+    target_df_file = os.path.join(output_path, "TARGET_TURNS.csv")
     issues_df_file = os.path.join(output_path, "ISSUES.csv")
 
     df = pd.read_csv(input_file)
     turns_df = build_turns_df(df)
     issues_df = validate_turns_df(turns_df)
+    target_df = build_target_df(turns_df)
 
     turns_df.to_csv(turns_df_file, index=False)
     issues_df.to_csv(issues_df_file, index=False)
+    target_df.to_csv(target_df_file, index=False)
 
     print("DATAFRAMES CHARACTERISTICS")
     print("Messages per speaker : \n")
