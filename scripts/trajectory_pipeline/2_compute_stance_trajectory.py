@@ -2,11 +2,9 @@ import pandas as pd
 import os
 
 INITIAL_STANCE_MAP = {
-    "strongly disagree": -1.0,
-    "disagree": -0.5,
+    "disagree": -1.0,
     "neutral": 0.0,
-    "agree": 0.5,
-    "strongly agree": 1.0,
+    "agree": 1.0,
 }
 
 def compute_alignment_trajectory(stance_df):
@@ -31,6 +29,9 @@ def compute_alignment_trajectory(stance_df):
     # Normalized alignment trajectory
     df["alignment_score"] = (df["stance_shift"] / 2.0)
 
+    # Absolute normalized alignment trajectory
+    df["stance_displacement"] = (df["alignment_score"].abs())
+
     return df
 
 def add_baseline_points(alignment_df):
@@ -41,6 +42,7 @@ def add_baseline_points(alignment_df):
     baselines["stance_score"] = baselines["initial_stance_score"]
     baselines["stance_shift"] = 0.0
     baselines["alignment_score"] = 0.0
+    baselines["stance_displacement"] = 0.0
 
     # These do not correspond to an actual model response
     baselines["text"] = pd.NA
@@ -51,7 +53,6 @@ def add_baseline_points(alignment_df):
     baselines["p_entailment"] = pd.NA
     baselines["p_neutral"] = pd.NA
     baselines["p_contradiction"] = pd.NA
-
     baselines["is_baseline"] = True
 
     alignment_df = alignment_df.copy()
