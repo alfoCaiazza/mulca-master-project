@@ -353,7 +353,7 @@ def compute_dimension_contributions(fpca_result):
 
     return pd.DataFrame(rows)
 
-################
+# ===================================================================================================================
 
 def main():
     main_dir = os.path.abspath( os.path.join(os.path.dirname(__file__), "..", "..", "data", "generative", "results"))
