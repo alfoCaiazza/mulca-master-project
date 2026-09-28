@@ -109,7 +109,6 @@ def determine_common_support(functional_df, functional_columns):
 
 # EXTRACT FUNCTIONAL MATRIX
 def extract_component_matrix(functional_df, session_ids, column, grid):
-
     pivot = (functional_df[functional_df["session_id"].isin(session_ids)]
         .pivot(
             index="session_id",
