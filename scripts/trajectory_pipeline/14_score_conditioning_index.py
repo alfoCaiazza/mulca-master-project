@@ -399,8 +399,9 @@ def score_session(session_id, session_df, config):
         return row
 
     weights = config["weights"]
+    p = config["aggregation_p"]
 
-    ci = sum(float(weights[dimension]) * subindices[dimension] for dimension in EXPECTED_DIMENSIONS)
+    ci = (sum(float(weights[dimension]) * (subindices[dimension] ** p) for dimension in EXPECTED_DIMENSIONS) ** (1.0 / p))
 
     row["conditioning_index"] = float(np.clip(ci, 0.0, 1.0))
 

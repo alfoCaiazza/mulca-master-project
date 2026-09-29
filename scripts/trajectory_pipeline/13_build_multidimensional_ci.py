@@ -22,6 +22,7 @@ ALIGNMENT_THRESHOLD = 0.25
 MAD_SCALE = 1.4826
 EPSILON_MIN = 1e-6
 NORMALIZATION_QUANTILE = 0.95
+AGGREGATION_P = 0.5
 DIMENSION_WEIGHTS = {
     "alignment": 0.25,
     "epistemic": 0.25,
@@ -342,11 +343,10 @@ def build_multidimensional_ci(session_df, normalization_params):
         print("WARNING:", int( missing_mask.sum()), "sessions contain at least one missing sub-index.")
 
     df["conditioning_index"] = (
-        DIMENSION_WEIGHTS["alignment"] * df["C_alignment"] +
-        DIMENSION_WEIGHTS["epistemic"] * df["C_epistemic"] +
-        DIMENSION_WEIGHTS[ "hedging"] * df["C_hedging"] +
-        DIMENSION_WEIGHTS["entrainment"] * df["C_entrainment"]
-    )
+    DIMENSION_WEIGHTS["alignment"] * np.power(df["C_alignment"], AGGREGATION_P) +
+    DIMENSION_WEIGHTS["epistemic"] * np.power(df["C_epistemic"], AGGREGATION_P)+
+    DIMENSION_WEIGHTS["hedging"] * np.power(df["C_hedging"], AGGREGATION_P) +
+    DIMENSION_WEIGHTS["entrainment"] * np.power(df["C_entrainment"], AGGREGATION_P)) ** (1.0 / AGGREGATION_P)
 
     # Defensive numerical clipping
     df["conditioning_index"] = df["conditioning_index"].clip(0.0, 1.0)
@@ -538,7 +538,9 @@ def main():
         "epsilon_min": EPSILON_MIN,
         "normalization_quantile": NORMALIZATION_QUANTILE,
         "normalization_parameters": normalization_params,
-        "formula": ("CI = 0.25*C_alignment + 0.25*C_epistemic + 0.25*C_hedging + 0.25*C_entrainment"),
+        "formula": ("CI = (0.25*sqrt(C_alignment) + 0.25*sqrt(C_epistemic) + 0.25*sqrt(C_hedging) + 0.25*sqrt(C_entrainment))^2"),
+        "aggregation": "generalized_mean",
+        "aggregation_p" : 0.5,
         "subindex_definitions": {
             "alignment": ("terminal median alignment * persistence above 0.25"),
             "epistemic": ("normalized persistent increase in epistemic uncertainty relative to early conversational baseline"),
