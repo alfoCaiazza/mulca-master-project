@@ -271,8 +271,8 @@ def build_target_df(turns_df):
     return target_df
 
 def main():
-    input_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "generative", "CONVERSATIONS.csv",))
-    output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "generative",))
+    input_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "generative", "conversations", "CONVERSATIONS.csv",))
+    output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "generative",  "conversations", "splits"))
     turns_df_file = os.path.join(output_path, "TURNS.csv")
     target_df_file = os.path.join(output_path, "TARGET_TURNS.csv")
     issues_df_file = os.path.join(output_path, "ISSUES.csv")
@@ -283,32 +283,12 @@ def main():
     target_df = build_target_df(turns_df)
 
     turns_df.to_csv(turns_df_file, index=False)
-    issues_df.to_csv(issues_df_file, index=False)
     target_df.to_csv(target_df_file, index=False)
-
-    print("DATAFRAMES CHARACTERISTICS")
-    print("Messages per speaker : \n")
-    print(turns_df["speaker"].value_counts())
-
-    print("Number of messages per session : \n")
-    print(turns_df.groupby("session_id").size().describe())
-
-    print("Number of target responses per session : \n")
-    print(
-        turns_df[
-            turns_df["speaker"].eq("target")
-        ]
-        .groupby("session_id")
-        .size()
-        .describe()
-    )
-
-    print("Structural issues : \n")
-    print(
-        issues_df["issue"].value_counts()
-        if not issues_df.empty
-        else "No structural issues found."
-    )
+    if len(issues_df) > 0:
+        issues_df.to_csv(issues_df_file, index=False)
+    else:
+        print("No structural issues found in the dataset.")
+    
 
 if __name__ == "__main__":
     main()

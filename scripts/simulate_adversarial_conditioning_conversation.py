@@ -261,7 +261,6 @@ async def run_simulation(attacker_model: str, target_model: str, session_id: str
     print(f"CLAIM: {claim}")
     print(f"CATEGORY: {claim_category}")
     print(f"PERSONA: {persona_name}")
-    print(f"TARGET INITIAL STANCE: {target_initial_stance}")
 
     history = []
 
@@ -356,7 +355,7 @@ async def run_simulation(attacker_model: str, target_model: str, session_id: str
     return output_data
 
 async def main():
-    output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "generative",))
+    output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "generative", "conversations"))
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     output_file = os.path.join(output_path, "ADVERSARIAL_CONVERSATIONS.csv")
 
@@ -376,12 +375,14 @@ async def main():
     random.shuffle(schedule)
 
     for attacker_model in MODELS:
+        if attacker_model != "gemma2:9b": # MUST GENERATE JUST THE GEMMA INSTANCES
+            continue
+
         # Random target, always different from attacker
         target_model = random.choice([m for m in MODELS if m != attacker_model])
-        print(f"Target model selected : {target_model}")
 
         async with aiohttp.ClientSession() as session:
-            for i, job in enumerate(tqdm(schedule, desc=f"Simulating conversations with {attacker_model} model...")):
+            for i, job in enumerate(tqdm(schedule, desc=f"Simulating conversations with ATTACKER : {attacker_model} and TARGET {target_model}...")):
                 result = await run_simulation(
                     attacker_model=attacker_model,
                     target_model = target_model,

@@ -355,7 +355,7 @@ async def run_simulation(model:str, session_id: str, claim: str, claim_category:
     return output_data
 
 async def main():
-    output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "generative",))
+    output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "generative", "conversations"))
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     output_file = os.path.join(output_path, "CONVERSATIONS.csv")
 
