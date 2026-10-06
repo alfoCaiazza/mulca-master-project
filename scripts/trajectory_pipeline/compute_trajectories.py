@@ -3,6 +3,7 @@ import os
 import random
 from compute_stance_trajectory import compute_stance_trajectory, plot_stance_trajectory
 from compute_epistemic_trajectory import compute_epistemic_scores, plot_epistemic_trajectory
+from compute_hedging_trajectory import compute_hedging_scores, plot_hedging_trajectory
 
 def compute_trajectories():
     main_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "generative"))
@@ -24,7 +25,11 @@ def compute_trajectories():
     print("Plotting a epistemic trajectory sample ...")
     plot_epistemic_trajectory(idx, trajectory_df, os.path.join(main_dir, "results", "figures"))
 
-    # 3 - Hadging dimension
-    # TODO: Implement hedging trajectory computation and plotting
+    # 3 - Hedging dimension
+    trajectory_df = compute_hedging_scores(trajectory_file, trajectory_df)
+    
+    print("Plotting a hedging trajectory sample ...")
+    plot_hedging_trajectory(idx, trajectory_df, os.path.join(main_dir, "results", "figures"))
+
 if __name__ == "__main__":
     compute_trajectories()
