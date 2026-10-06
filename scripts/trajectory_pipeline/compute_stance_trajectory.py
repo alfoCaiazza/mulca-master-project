@@ -135,8 +135,7 @@ def compute_stance_trajectory(target_file, trajectory_file):
     return trajectory_df
     print("Operation completed successfully!")
 
-def plot_stance_trajectory(trajectory_df, results_path: str):
-    idx = random.randint(0, 399)
+def plot_stance_trajectory(idx, trajectory_df, results_path: str):
     session_ts = (trajectory_df[trajectory_df['session_id'] == f'session_{idx}'].sort_values('t'))
     session_ts[['session_id', 't', 'stance_displacement']]
 
