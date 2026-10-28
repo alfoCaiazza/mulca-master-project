@@ -6,14 +6,15 @@ FUNCTIONAL_COLUMNS = [
     "alignment_score",
     "epistemic_uncertainty",
     "hedging_score",
-    "entrainment_score",
+    "structural_entrainment_score",
 ]
 
 def interpolate_on_common_grid(trajectory_df, grid_size=50):
     grid = np.linspace(0.0, 1.0, grid_size)
 
     metadata_cols = [
-        "model",
+        "attacker_model",
+        "target_model",
         "claim",
         "claim_category",
         "attacker_persona",
@@ -52,24 +53,8 @@ def interpolate_on_common_grid(trajectory_df, grid_size=50):
             # IMPORTANT: do not extrapolate outside observed support
             interpolated[grid < x.min()] = np.nan
             interpolated[grid > x.max()] = np.nan
-
             session_grid[col] = interpolated
 
         output.append(session_grid)
 
     return pd.concat(output, ignore_index=True)
-
-def main():
-    main_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "generative", "results"))
-    trajectory_dir = os.path.join(main_dir, "TRAJECTORY.csv")
-    functional_dir = os.path.join(main_dir, "FUNCTIONAL_GRID.csv")
-
-    trajectory_df = pd.read_csv(trajectory_dir)
-
-    print("Interpolating conversations trajectories on common grid ...")
-    functional_df = interpolate_on_common_grid(trajectory_df, grid_size=50)
-    functional_df.to_csv(functional_dir, index=False)
-    print("Operation completed successfully!")
-
-if __name__ == "__main__":
-    main()

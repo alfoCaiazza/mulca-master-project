@@ -6,7 +6,7 @@ FUNCTIONAL_COLUMNS = [
     "alignment_score",
     "epistemic_uncertainty",
     "hedging_score",
-    "entrainment_score",
+    "structural_entrainment_score",
 ]
 
 def build_functional_representation(functional_df):
@@ -18,19 +18,7 @@ def build_functional_representation(functional_df):
     X = {}
 
     for col in FUNCTIONAL_COLUMNS:
-        matrix = (
-            functional_df
-            .pivot(
-                index="session_id",
-                columns="t",
-                values=col
-            )
-            .reindex(
-                index=session_ids,
-                columns=grid
-            )
-        )
-
+        matrix = (functional_df.pivot(index="session_id", columns="t", values=col).reindex(index=session_ids, columns=grid))
         X[col] = matrix.to_numpy(dtype=float)
 
     return session_ids, grid, X
