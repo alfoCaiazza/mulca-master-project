@@ -271,7 +271,7 @@ def build_target_df(turns_df):
     return target_df
 
 def main():
-    input_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "generative", "conversations", "CONVERSATIONS.csv",))
+    input_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "generative", "conversations", "ADVERSARIAL_CONVERSATIONS.csv",))
     output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "generative",  "conversations", "splits"))
     turns_df_file = os.path.join(output_path, "TURNS.csv")
     target_df_file = os.path.join(output_path, "TARGET_TURNS.csv")
