@@ -12,7 +12,6 @@ RANDOM_SEED = 42
 random.seed(RANDOM_SEED)
 
 BACKEND_URL = "http://localhost:11434"
-MODELS = ["llama3.1:8b", "mistral:7b", "glm4:9b"]
 
 # Defining ATTACKER-TARGET prompts
 ATTACKER_PERSONAS = [
@@ -253,8 +252,8 @@ async def fetch_message_with_guardrails(model:str, session: aiohttp.ClientSessio
     return None, False
 
 # Orchestrator core
-async def run_simulation(attacker_model: str, target_model: str, session_id: str, claim: str, claim_category: str, http_session: aiohttp.ClientSession, max_turns: int):
-    print(f"\nSTARTING SIMULATION: {session_id}")
+async def run_simulation(attacker_model: str, target_model: str, conversation_id: str, claim: str, claim_category: str, http_session: aiohttp.ClientSession, max_turns: int):
+    print(f"\nSTARTING SIMULATION: {conversation_id}")
 
     persona = random.choice(ATTACKER_PERSONAS)
     persona_name = persona["name"]
@@ -286,7 +285,7 @@ async def run_simulation(attacker_model: str, target_model: str, session_id: str
     status = "completed"
     completed_turns = 0
 
-    for turn in tqdm(range(1, max_turns + 1), desc=f"Running simulation {session_id} ..."):
+    for turn in tqdm(range(1, max_turns + 1), desc=f"Running simulation {conversation_id} ..."):
         # ATTACKER TURN - passing max_turns to calculate the current phase
         attacker_sys_prompt = get_attacker_system_prompt(
             claim, 
@@ -347,7 +346,7 @@ async def run_simulation(attacker_model: str, target_model: str, session_id: str
         completed_turns += 1
 
     output_data = {
-        "session_id": session_id,
+        "conversation_id": conversation_id,
         "attacker_model" : attacker_model,
         "target_model": target_model,
         "claim": claim,
@@ -372,10 +371,9 @@ async def main():
     MODEL_PAIRS = [
         ("qwen2.5:7b", "llama3.1:8b"), # Attacker: Qwen -> Target: Llama
         ("qwen2.5:7b", "glm4:9b"),     # Attacker: Qwen -> Target: GLM
-        ("qwen2.5:7b", "mistral:7b")   # Attacker: Qwen -> Target: Mistral
     ]
 
-    N_SIMULATIONS_TOTAL = 225 
+    N_SIMULATIONS_TOTAL = 200
     N_SIMULATIONS_PER_PAIR = N_SIMULATIONS_TOTAL // len(MODEL_PAIRS)
     n_categories = len(CLAIMS)
     N_SIMULATIONS_PER_CATEGORY = N_SIMULATIONS_PER_PAIR // n_categories 
@@ -402,7 +400,7 @@ async def main():
             result = await run_simulation(
                 attacker_model=job["attacker"],
                 target_model=job["target"],
-                session_id=f"sim_{i:03d}",
+                conversation_id=f"conv_{i:03d}",
                 claim=job["claim"],
                 claim_category=job["category"],
                 http_session=session,

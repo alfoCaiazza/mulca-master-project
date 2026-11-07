@@ -1,11 +1,14 @@
-import random
-import pandas as pd
 import os
+import pandas as pd
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
+import random
+
+# Reproducibility
+random.seed(42)
 
 INITIAL_STANCE_MAP = {
     "disagree": -1.0,
@@ -29,7 +32,9 @@ class StanceEvaluator:
         }
 
     def _compute_nli(self, text, premise):
-        inputs = self.tokenizer(text, premise, return_tensors="pt", truncation=True, max_length=512).to(self.device)
+        inputs = self.tokenizer(
+            text, premise, return_tensors="pt", truncation=True, max_length=512
+        ).to(self.device)
         
         with torch.no_grad():
             logits = self.model(**inputs).logits
@@ -44,36 +49,24 @@ class StanceEvaluator:
 
         return p_entailment, p_neutral, p_contradiction, stance_score
 
-    def evaluate(self, text, global_claim, local_claim):
-        # Global Evaluation (Macro-Alignment vs Claim Iniziale)
-        g_ent, g_neu, g_con, g_stance = self._compute_nli(text, global_claim)
-        
-        # Local Evaluation (Micro-Alignment vs Turno Precedente Attacker)
-        if pd.notna(local_claim):
-            l_ent, l_neu, l_con, l_stance = self._compute_nli(text, local_claim)
-        else:
-            l_ent, l_neu, l_con, l_stance = pd.NA, pd.NA, pd.NA, pd.NA
+    def evaluate(self, text, claim):
+        g_ent, g_neu, g_con, g_stance = self._compute_nli(text, claim)
 
         return {
-            "global_p_entailment": g_ent,
-            "global_p_neutral": g_neu,
-            "global_p_contradiction": g_con,
-            "global_stance_score": g_stance,
-            "local_p_entailment": l_ent,
-            "local_p_neutral": l_neu,
-            "local_p_contradiction": l_con,
-            "local_stance_score": l_stance,
+            "p_entailment": g_ent,
+            "p_neutral": g_neu,
+            "p_contradiction": g_con,
+            "stance_score": g_stance,
         }
 
 def compute_stance_scores(target_df, evaluator):
     df = target_df.copy()
     results = []
 
-    for _, row in tqdm(df.iterrows(), total=len(df), desc="Computing global and local stance..."):
+    for _, row in tqdm(df.iterrows(), total=len(df), desc="Computing global stance alignment..."):
         result = evaluator.evaluate(
             text=row["text"], 
-            global_claim=row["global_claim"], 
-            local_claim=row.get("local_claim", pd.NA)
+            claim=row["claim"]
         )
         results.append(result)
 
@@ -96,31 +89,26 @@ def compute_alignment_trajectory(stance_df):
         raise ValueError(f"Unknown initial stance values: {unknown}")
 
     # Global Alignment Metrics
-    df["global_stance_shift"] = df["global_stance_score"] - df["initial_stance_score"]
-    df["global_alignment_score"] = (df["global_stance_score"] + 1) / 2.0
-    df["global_stance_displacement"] = df["global_alignment_score"].abs()
-
-    # Local Alignment Metrics
-    df["local_alignment_score"] = (df["local_stance_score"] + 1) / 2.0
+    df["stance_shift"] = df["stance_score"] - df["initial_stance_score"]
+    df["alignment_score"] = (df["stance_score"] + 1) / 2.0
+    df["stance_displacement"] = df["alignment_score"].abs()
 
     return df
 
 def add_baseline_points(alignment_df):
-    baselines = alignment_df.groupby("session_id", as_index=False).first()
+    baselines = alignment_df.groupby("conversation_id", as_index=False).first()
 
     baselines["t"] = 0.0
     baselines["target_turn_index"] = 0
     
-    # Init Global Baseline
-    baselines["global_stance_score"] = baselines["initial_stance_score"]
-    baselines["global_stance_shift"] = 0.0
-    baselines["global_alignment_score"] = 0.0
-    baselines["global_stance_displacement"] = 0.0
-    
-    # Init Local Baseline (Null a t=0 in assenza di turni precedenti)
-    baselines["local_stance_score"] = pd.NA
-    baselines["local_alignment_score"] = pd.NA
-
+    # Init Global Baseline (Stance iniziale S_0 = -1.0 -> Alignment A_0 = 0.0)
+    baselines["stance_score"] = baselines["initial_stance_score"]
+    baselines["stance_shift"] = 0.0
+    baselines["alignment_score"] = (baselines["initial_stance_score"] + 1) / 2.0
+    baselines["stance_displacement"] = baselines["alignment_score"].abs()
+    baselines["p_entailment"] = pd.NA
+    baselines["p_neutral"] = pd.NA
+    baselines["p_contradiction"] = pd.NA
     baselines["text"] = pd.NA
     baselines["message_index"] = pd.NA
     baselines["message_id"] = pd.NA
@@ -131,34 +119,58 @@ def add_baseline_points(alignment_df):
     alignment_df["is_baseline"] = False
 
     trajectory_df = pd.concat([alignment_df, baselines], ignore_index=True)
-    return trajectory_df.sort_values(["session_id", "t"]).reset_index(drop=True)
+    return trajectory_df.sort_values(["conversation_id", "t"]).reset_index(drop=True)
 
 def compute_stance_trajectory(target_file, trajectory_file):
     print("Instantiating Stance Evaluator ...")
     evaluator = StanceEvaluator()
 
-    print("Computing stance trajectory for each conversation ...")
+    print("Computing stance trajectory for target turns ...")
     target_df = pd.read_csv(target_file)
     stance_df = compute_stance_scores(target_df, evaluator)
     alignment_df = compute_alignment_trajectory(stance_df)
     trajectory_df = add_baseline_points(alignment_df)
 
     trajectory_df.to_csv(trajectory_file, index=False)
+    print(f"Stance trajectory dataset saved to {trajectory_file}")
     return trajectory_df
 
-def plot_stance_trajectory(idx, trajectory_df, results_path: str):
-    session_ts = (trajectory_df[trajectory_df['session_id'] == f'session_{idx}'].sort_values('t'))
-    session_ts[['session_id', 't', 'stance_displacement']]
+def plot_stance_trajectory(conversation_id: str, trajectory_df: pd.DataFrame, results_path: str):
+    session_ts = trajectory_df[trajectory_df['conversation_id'] == conversation_id].sort_values('t')
 
-    figure_path = os.path.join(results_path, 'stance_displacement_example.png')
+    if session_ts.empty:
+        print(f"Session {conversation_id} not found.")
+        return
+
+    os.makedirs(results_path, exist_ok=True)
+    figure_path = os.path.join(results_path, f'{conversation_id}_alignment_trajectory.png')
 
     sns.set_theme(style='whitegrid')
     fig, ax = plt.subplots(figsize=(8, 5))
 
-    sns.lineplot(data=session_ts, x='target_turn_index', y='stance_displacement', marker='o', ax=ax)
-    ax.axhline(0, linestyle='--', alpha=0.5)
-    ax.set(xlabel='Target turn', ylabel='Stance displacement', title='Stance displacement example')
+    sns.lineplot(data=session_ts, x='t', y='alignment_score', marker='o', ax=ax)
+    ax.set_ylim(-0.05, 1.05)
+    ax.set(
+        xlabel='Normalized Time (t)',
+        ylabel='Global Alignment Score (A_t)',
+        title=f'Stance Alignment Trajectory - {conversation_id}'
+    )
 
     fig.tight_layout()
     fig.savefig(figure_path, dpi=300, bbox_inches='tight')
-    print("Plot saved successfully!")
+    plt.close(fig)
+    print(f"Plot saved successfully to {figure_path}")
+
+def main():
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    target_file = os.path.join(base_dir, "data", "splits", "TARGET_TURNS.csv")
+    trajectory_file = os.path.join(base_dir, "data", "trajectory", "TRAJECTORY.csv")
+    results_dir = os.path.join(base_dir, "results")
+
+    os.makedirs(results_dir, exist_ok=True)
+
+    trajectory_df = compute_stance_trajectory(target_file, trajectory_file)
+    trajectory_df.to_csv(trajectory_file, index=False)
+
+if __name__ == "__main__":
+    main()

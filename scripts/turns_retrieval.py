@@ -129,7 +129,7 @@ def build_turns_df(sessions_df):
 
     turns_df.loc[target_mask, "target_turn_index"] = (
         turns_df.loc[target_mask]
-        .groupby("session_id")
+        .groupby("conversation_id")
         .cumcount()
         + 1
     )
@@ -140,7 +140,7 @@ def build_turns_df(sessions_df):
     )
 
     turns_df["message_id"] = (
-        turns_df["session_id"].astype(str)
+        turns_df["conversation_id"].astype(str)
         + "_"
         + turns_df["message_index"].astype(str)
     )
@@ -150,8 +150,8 @@ def build_turns_df(sessions_df):
 def validate_turns_df(turns_df):
     issues = []
 
-    for session_id, g in turns_df.groupby(
-        "session_id",
+    for conversation_id, g in turns_df.groupby(
+        "conversation_id",
         sort=False
     ):
         g = g.sort_values("message_index")
@@ -161,7 +161,7 @@ def validate_turns_df(turns_df):
 
         if invalid_speakers:
             issues.append({
-                "session_id": session_id,
+                "conversation_id": conversation_id,
                 "issue": "invalid_speaker",
                 "details": str(sorted(invalid_speakers)),
             })
@@ -171,7 +171,7 @@ def validate_turns_df(turns_df):
 
         if empty.any():
             issues.append({
-                "session_id": session_id,
+                "conversation_id": conversation_id,
                 "issue": "empty_text",
                 "details": f"{int(empty.sum())} empty messages",
             })
@@ -190,7 +190,7 @@ def validate_turns_df(turns_df):
             )
 
             issues.append({
-                "session_id": session_id,
+                "conversation_id": conversation_id,
                 "issue": "duplicate_turn_speaker",
                 "details": str(problematic),
             })
@@ -206,7 +206,7 @@ def validate_turns_df(turns_df):
 
         if speakers != expected:
             issues.append({
-                "session_id": session_id,
+                "conversation_id": conversation_id,
                 "issue": "speaker_sequence",
                 "details": "Sequence is not strict attacker-target alternation",
             })
@@ -226,7 +226,7 @@ def validate_turns_df(turns_df):
 
             if speaker_turns != expected_turns:
                 issues.append({
-                    "session_id": session_id,
+                    "conversation_id": conversation_id,
                     "issue": f"{speaker}_turn_sequence",
                     "details": (
                         f"Observed={speaker_turns}; "
@@ -244,7 +244,7 @@ def validate_turns_df(turns_df):
 
             if pd.notna(declared) and n_target != int(declared):
                 issues.append({
-                    "session_id": session_id,
+                    "conversation_id": conversation_id,
                     "issue": "completed_turns_mismatch",
                     "details": (
                         f"metadata={int(declared)}, "
@@ -258,11 +258,11 @@ def build_target_df(turns_df):
     target_df = (
         turns_df[turns_df["speaker"].eq("target")]
         .copy()
-        .sort_values(["session_id", "target_turn_index"])
+        .sort_values(["conversation_id", "target_turn_index"])
     )
 
     target_df["n_target_turns"] = (target_df
-        .groupby("session_id")["target_turn_index"]
+        .groupby("conversation_id")["target_turn_index"]
         .transform("max")
     )
 
@@ -271,8 +271,8 @@ def build_target_df(turns_df):
     return target_df
 
 def main():
-    input_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "generative", "conversations", "ADVERSARIAL_CONVERSATIONS.csv",))
-    output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "generative",  "conversations", "splits"))
+    input_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "conversations", "ADVERSARIAL_CONVERSATIONS.csv",))
+    output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "splits"))
     turns_df_file = os.path.join(output_path, "TURNS.csv")
     target_df_file = os.path.join(output_path, "TARGET_TURNS.csv")
     issues_df_file = os.path.join(output_path, "ISSUES.csv")
